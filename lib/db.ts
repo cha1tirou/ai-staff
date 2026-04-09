@@ -4,7 +4,7 @@ let sql: ReturnType<typeof postgres>
 
 function getDB() {
   if (!sql) {
-    sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require', max: 5 })
+    sql = postgres(process.env.DATABASE_URL ?? process.env.POSTGRES_URL!, { ssl: 'require', max: 5 })
   }
   return sql
 }
