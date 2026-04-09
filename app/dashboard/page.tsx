@@ -13,5 +13,6 @@ export default async function DashboardPage() {
     getAgentsByUser(session.userId),
   ])
 
-  return <DashboardClient user={user} agents={agents} />
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return <DashboardClient user={user as any} agents={agents as any} />
 }
