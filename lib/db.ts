@@ -96,6 +96,26 @@ export async function deleteAgent(agentId: string, userId: string) {
   `
 }
 
+export async function updateAgent(agentId: string, userId: string, data: {
+  role?: string, tasks?: string[], customTasks?: string,
+  startHour?: string, endHour?: string, approvalMode?: string, reportEmail?: string
+}) {
+  const db = getDB()
+  const [agent] = await db`
+    UPDATE agents SET
+      role = COALESCE(${data.role ?? null}, role),
+      tasks = COALESCE(${data.tasks ?? null}, tasks),
+      custom_tasks = COALESCE(${data.customTasks ?? null}, custom_tasks),
+      start_hour = COALESCE(${data.startHour ?? null}, start_hour),
+      end_hour = COALESCE(${data.endHour ?? null}, end_hour),
+      approval_mode = COALESCE(${data.approvalMode ?? null}, approval_mode),
+      report_email = COALESCE(${data.reportEmail ?? null}, report_email)
+    WHERE id = ${agentId} AND user_id = ${userId}
+    RETURNING *
+  `
+  return agent
+}
+
 export async function updateAgentStatus(agentId: string, userId: string, status: string) {
   const db = getDB()
   const [agent] = await db`

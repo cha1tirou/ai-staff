@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { getAgentsByUser, deleteAgent, updateAgentStatus } from '@/lib/db'
+import { getAgentsByUser, deleteAgent, updateAgentStatus, updateAgent } from '@/lib/db'
 
 export async function GET() {
   const session = await getSession()
@@ -22,5 +22,13 @@ export async function PATCH(req: NextRequest) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { agentId, status } = await req.json()
   const agent = await updateAgentStatus(agentId, session.userId, status)
+  return NextResponse.json({ agent })
+}
+
+export async function PUT(req: NextRequest) {
+  const session = await getSession()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { agentId, ...data } = await req.json()
+  const agent = await updateAgent(agentId, session.userId, data)
   return NextResponse.json({ agent })
 }
