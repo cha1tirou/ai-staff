@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
-type Phase = 'research' | 'chat' | 'proposal' | 'hiring'
+type Phase = 'research' | 'mode-select' | 'chat' | 'proposal' | 'hiring'
+type Mode = 'defined' | 'explore' | null
 
 type Message = { role: 'ai' | 'user'; text: string }
 
@@ -18,7 +19,8 @@ type Proposal = {
   approvalMode: 'confirm' | 'auto'
 }
 
-const SYSTEM_PROMPT = `あなたはAIスタッフ採用サービスのコンシェルジュです。
+// モードA: 業務が決まっている → ヒアリングで詰める
+const SYSTEM_PROMPT_DEFINED = `あなたはAIスタッフ採用サービスのコンシェルジュです。
 事業者情報をもとに、自然な会話でヒアリングを行い、最適なAIスタッフの役割と業務を定義します。
 
 ルール：
@@ -48,9 +50,43 @@ PROPOSAL:
   "approvalMode": "confirm"
 }`
 
+// モードB: 目的・課題から業務を提案する
+const SYSTEM_PROMPT_EXPLORE = `あなたはAIスタッフ採用サービスのコンシェルジュです。
+事業者の目的・課題をヒアリングし、AIスタッフに任せるべき業務を提案します。
+
+ルール：
+- まず「何を達成したいか」「今どんな課題があるか」を引き出す
+- 次に「リソース・時間・優先度」を確認する
+- 1回のメッセージで1〜2個の質問のみ。短くテンポよく。
+- 3〜5往復でヒアリングを完了させ、業務セットを提案する
+- 日本語で話す。親しみやすく丁寧に
+- ユーザーが「提案して」「OK」「決めて」「この方向で」などと言ったら必ず提案フェーズへ移行する
+
+★重要★ 提案を求められたら、または4往復を超えたら、必ず以下の形式のみで出力すること。
+説明文・前置き・後置き・コードブロックは一切不要。PROPOSAL:から始めること。
+tasksは目的・課題に対応した具体的な業務を3〜5個提案すること。
+
+PROPOSAL:
+{
+  "role": "役割名（目的を反映した名前、例：集客強化 Ai・業務効率化 Ai）",
+  "tag": "一言タグ（例：売上向上・コスト削減・顧客対応強化）",
+  "icon": "絵文字1文字",
+  "tasks": [
+    {"task": "業務名", "detail": "具体的な手順・頻度・成果物を詳しく"}
+  ],
+  "schedule": {
+    "start": "09:00",
+    "end": "18:00",
+    "weekly": ["月曜: ○○", "金曜: ○○"]
+  },
+  "report": "報告タイミングと方法を具体的に",
+  "approvalMode": "confirm"
+}`
+
 export default function OnboardingPage() {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>('research')
+  const [mode, setMode] = useState<Mode>(null)
   const [urlInput, setUrlInput] = useState('')
   const [researchStep, setResearchStep] = useState(0)
   const [bizContext, setBizContext] = useState('')
@@ -91,7 +127,6 @@ export default function OnboardingPage() {
     setResearchStep(1)
 
     try {
-      // アニメーション
       for (let i = 2; i <= 4; i++) {
         await new Promise(r => setTimeout(r, 700))
         setResearchStep(i)
@@ -99,27 +134,50 @@ export default function OnboardingPage() {
 
       const text = await callClaude([{
         role: 'user',
-        content: `事業者「${urlInput}」について以下をJSON形式で返してください（日本語、JSONのみ）：
-{"name":"正式名称または推測名称","type":"業種","description":"事業概要2〜3文","icon":"絵文字1文字","greeting":"この事業者への最初の挨拶と質問（事業への理解を示しながら最初の質問をする。60文字以内）"}`
+        content: `事業者「${urlInput}」について以下をJSON形式で返してください（日本語、JSONのみ）：\n{"name":"正式名称または推測名称","type":"業種","description":"事業概要2〜3文","icon":"絵文字1文字"}`
       }], 'JSONのみ返してください。')
 
       let info: any = {}
       try { info = JSON.parse(text.replace(/```json|```/g, '').trim()) } catch {}
 
       const ctx = `事業者: ${info.name || urlInput}\n業種: ${info.type || '不明'}\n概要: ${info.description || ''}`
-      const greeting = info.greeting || `${info.name || urlInput}について教えてください。どんな業務をAIスタッフに任せたいですか？`
-
       setBizContext(ctx)
       setBizInfo({ name: info.name || urlInput, desc: info.description || '', icon: info.icon || '🏢' })
+      setPhase('mode-select')
+    } catch (e: any) {
+      setError(e.message || 'エラーが発生しました')
+      setPhase('research')
+      setResearchStep(0)
+    }
+  }
+
+  async function selectMode(selectedMode: Mode) {
+    setMode(selectedMode)
+    setLoading(true)
+
+    try {
+      const promptKey = selectedMode === 'defined'
+        ? `事業者情報:\n${bizContext}\n\nモード: 業務がある程度決まっているユーザー向けヒアリング。最初の挨拶と質問（事業への理解を示しながら、どんな業務を任せたいか聞く。60文字以内）をJSON {"greeting":"..."} で返してください。`
+        : `事業者情報:\n${bizContext}\n\nモード: 目的・課題から業務を提案するユーザー向けヒアリング。最初の挨拶と質問（事業への理解を示しながら、何を達成したいか・どんな課題があるかを聞く。60文字以内）をJSON {"greeting":"..."} で返してください。`
+
+      const text = await callClaude([{ role: 'user', content: promptKey }], 'JSONのみ返してください。')
+      let info: any = {}
+      try { info = JSON.parse(text.replace(/```json|```/g, '').trim()) } catch {}
+
+      const greeting = info.greeting || (
+        selectedMode === 'defined'
+          ? `${bizInfo.name}について、どんな業務をAIスタッフに任せたいか教えてください！`
+          : `${bizInfo.name}として、今一番解決したい課題や達成したい目標は何ですか？`
+      )
+
       setFirstGreeting(greeting)
       setMessages([{ role: 'ai', text: greeting }])
       setHistory([{ role: 'assistant', content: greeting }])
       setPhase('chat')
     } catch (e: any) {
       setError(e.message || 'エラーが発生しました')
-      setPhase('research')
-      setResearchStep(0)
     }
+    setLoading(false)
   }
 
   async function sendMessage(text?: string) {
@@ -135,12 +193,13 @@ export default function OnboardingPage() {
     setLoading(true)
 
     try {
+      const systemPrompt = mode === 'explore' ? SYSTEM_PROMPT_EXPLORE : SYSTEM_PROMPT_DEFINED
       const convo = [
         { role: 'user', content: `事業者情報:\n${bizContext}\n\nヒアリングを開始してください。最初の挨拶は既に送りました：「${firstGreeting}」` },
         ...newHistory
       ]
 
-      const reply = await callClaude(convo, SYSTEM_PROMPT)
+      const reply = await callClaude(convo, systemPrompt)
 
       const proposalMatch = reply.match(/PROPOSAL:\s*(\{[\s\S]*\})/i)
       if (proposalMatch) {
@@ -196,11 +255,27 @@ export default function OnboardingPage() {
   }
 
   // クイック返信チップ
-  const chips = turns === 0
-    ? ['SNSの運用・投稿', 'メール・問い合わせ対応', 'リサーチ・競合調査', '資料・コンテンツ作成', 'まだ決まっていない']
-    : turns >= 3
-    ? ['この方向でOK、提案してください', 'もう少し詳しく決めたい']
-    : []
+  const chips = mode === 'explore'
+    ? (turns === 0
+        ? ['売上・集客を増やしたい', '業務を効率化したい', '顧客対応を改善したい', 'コストを削減したい', 'まだ漠然としている']
+        : turns >= 3
+        ? ['この方向でOK、提案してください', 'もう少し詳しく話したい']
+        : [])
+    : (turns === 0
+        ? ['SNSの運用・投稿', 'メール・問い合わせ対応', 'リサーチ・競合調査', '資料・コンテンツ作成', 'まだ決まっていない']
+        : turns >= 3
+        ? ['この方向でOK、提案してください', 'もう少し詳しく決めたい']
+        : [])
+
+  const progressWidth = phase === 'research' ? '25%'
+    : phase === 'mode-select' ? '50%'
+    : phase === 'chat' ? '75%'
+    : '100%'
+
+  const stepLabel = phase === 'research' ? 'ステップ 1 / 4'
+    : phase === 'mode-select' ? 'ステップ 2 / 4'
+    : phase === 'chat' ? 'ステップ 3 / 4'
+    : 'ステップ 4 / 4'
 
   return (
     <div className="min-h-screen grid-bg flex flex-col">
@@ -212,17 +287,12 @@ export default function OnboardingPage() {
           </div>
           <span className="font-medium text-fg">AI Staff</span>
         </Link>
-        <div className="text-muted text-sm">
-          {phase === 'research' && 'ステップ 1 / 3'}
-          {phase === 'chat' && 'ステップ 2 / 3'}
-          {phase === 'proposal' && 'ステップ 3 / 3'}
-        </div>
+        <div className="text-muted text-sm">{stepLabel}</div>
       </header>
 
       {/* Progress bar */}
       <div className="h-0.5 bg-border">
-        <div className="h-full bg-accent transition-all duration-500"
-          style={{ width: phase === 'research' ? '33%' : phase === 'chat' ? '66%' : '100%' }} />
+        <div className="h-full bg-accent transition-all duration-500" style={{ width: progressWidth }} />
       </div>
 
       <main className="flex-1 flex flex-col items-center px-6 py-8">
@@ -282,6 +352,68 @@ export default function OnboardingPage() {
             </div>
           )}
 
+          {/* ── Phase Mode Select ── */}
+          {phase === 'mode-select' && (
+            <div className="animate-fade-up">
+              {/* 事業者バー */}
+              <div className="flex items-center gap-3 p-3 rounded-xl border border-border bg-surface mb-6">
+                <div className="w-9 h-9 rounded-lg bg-accent-dim/40 flex items-center justify-center text-lg flex-shrink-0">
+                  {bizInfo.icon}
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-fg">{bizInfo.name}</div>
+                  <div className="text-xs text-muted leading-snug">{bizInfo.desc}</div>
+                </div>
+              </div>
+
+              <p className="text-sm text-muted mb-4">どのようにAIスタッフを決めますか？</p>
+
+              <div className="flex flex-col gap-3">
+                {/* モードA */}
+                <button
+                  onClick={() => selectMode('defined')}
+                  disabled={loading}
+                  className="group text-left p-5 rounded-xl border border-border bg-surface hover:border-accent transition-all duration-200 disabled:opacity-40"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center text-xl flex-shrink-0 group-hover:bg-accent/20 transition-colors">
+                      🎯
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-fg mb-1">任せたい業務が決まっている</div>
+                      <div className="text-xs text-muted leading-relaxed">やりたいことはある程度イメージできている。詳細をヒアリングして最適なスタッフを定義します。</div>
+                    </div>
+                  </div>
+                </button>
+
+                {/* モードB */}
+                <button
+                  onClick={() => selectMode('explore')}
+                  disabled={loading}
+                  className="group text-left p-5 rounded-xl border border-border bg-surface hover:border-accent transition-all duration-200 disabled:opacity-40"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-lg bg-purple-900/30 flex items-center justify-center text-xl flex-shrink-0 group-hover:bg-purple-900/50 transition-colors">
+                      💡
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-fg mb-1">目的・課題から提案してほしい</div>
+                      <div className="text-xs text-muted leading-relaxed">達成したいことや困っていることはある。何をAIに任せるべきか、Claudeが業務セットを提案します。</div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {loading && (
+                <div className="mt-4 flex items-center gap-2 text-muted text-sm">
+                  <span className="w-4 h-4 border-2 border-border border-t-accent rounded-full animate-spin" />
+                  ヒアリングを準備中...
+                </div>
+              )}
+              {error && <p className="mt-3 text-red-400 text-sm">{error}</p>}
+            </div>
+          )}
+
           {/* ── Phase Chat: ヒアリング ── */}
           {(phase === 'chat' || phase === 'proposal') && (
             <div>
@@ -290,9 +422,17 @@ export default function OnboardingPage() {
                 <div className="w-9 h-9 rounded-lg bg-accent-dim/40 flex items-center justify-center text-lg flex-shrink-0">
                   {bizInfo.icon}
                 </div>
-                <div>
+                <div className="flex-1">
                   <div className="text-sm font-medium text-fg">{bizInfo.name}</div>
                   <div className="text-xs text-muted leading-snug">{bizInfo.desc}</div>
+                </div>
+                {/* モードバッジ */}
+                <div className={`text-xs px-2 py-1 rounded-full border flex-shrink-0 ${
+                  mode === 'explore'
+                    ? 'border-purple-700/50 text-purple-400 bg-purple-900/20'
+                    : 'border-accent/30 text-accent bg-accent/10'
+                }`}>
+                  {mode === 'explore' ? '💡 提案型' : '🎯 業務型'}
                 </div>
               </div>
 
@@ -305,11 +445,8 @@ export default function OnboardingPage() {
                     }`}>
                       {m.role === 'ai' ? 'AI' : '私'}
                     </div>
-                    <div className={`max-w-xs px-4 py-2.5 rounded-2xl text-sm leading-relaxed border ${
-                      m.role === 'ai'
-                        ? 'bg-surface border-border text-fg'
-                        : 'bg-surface border-border text-fg'
-                    }`} style={{ whiteSpace: 'pre-wrap' }}>
+                    <div className="max-w-xs px-4 py-2.5 rounded-2xl text-sm leading-relaxed border bg-surface border-border text-fg"
+                      style={{ whiteSpace: 'pre-wrap' }}>
                       {m.text}
                     </div>
                   </div>
@@ -415,8 +552,7 @@ export default function OnboardingPage() {
                 <button
                   onClick={() => {
                     setPhase('chat')
-                    const aiMsg = { role: 'ai', text: 'どの部分を修正しますか？' }
-                    setMessages(prev => [...prev, aiMsg])
+                    setMessages(prev => [...prev, { role: 'ai', text: 'どの部分を修正しますか？' }])
                     setHistory(prev => [...prev, { role: 'assistant', content: 'どの部分を修正しますか？' }])
                   }}
                   className="flex-1 py-2.5 rounded-lg border border-border text-muted text-sm hover:text-fg transition-colors">
