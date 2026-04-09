@@ -343,7 +343,6 @@ export default function OnboardingPage() {
                     ref={inputRef}
                     value={input}
                     onChange={e => { setInput(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 90) + 'px' }}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
                     placeholder="自由に入力してください..."
                     rows={1}
                     disabled={loading}
