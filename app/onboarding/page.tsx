@@ -247,7 +247,7 @@ export default function OnboardingPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      router.push(`/complete?agentId=${data.agentId}&name=${encodeURIComponent(proposal.role)}`)
+      router.push(`/complete?agentId=${data.agentId}&name=${encodeURIComponent(proposal.role)}&bizName=${encodeURIComponent(bizInfo.name)}`)
     } catch (e: any) {
       setError(e.message || '採用に失敗しました')
       setHiring(false)
