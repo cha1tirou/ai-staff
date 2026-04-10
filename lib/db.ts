@@ -36,9 +36,15 @@ export async function initDB() {
       managed_agent_id TEXT,
       environment_id TEXT,
       status TEXT DEFAULT 'active',
+      connection_status TEXT DEFAULT 'pending',
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `
+  // 既存DBへのマイグレーション
+  await db`ALTER TABLE agents ADD COLUMN IF NOT EXISTS connection_status TEXT DEFAULT 'pending'`
+  await db`ALTER TABLE users ADD COLUMN IF NOT EXISTS orchestrator_agent_id TEXT`
+  await db`ALTER TABLE users ADD COLUMN IF NOT EXISTS orchestrator_env_id TEXT`
+  await db`ALTER TABLE users ADD COLUMN IF NOT EXISTS biz_name TEXT`
 }
 
 export async function createUser(email: string, passwordHash: string, name?: string) {
@@ -62,21 +68,37 @@ export async function getUserByEmail(email: string) {
 export async function getUserById(id: string) {
   const db = getDB()
   const [user] = await db`
-    SELECT id, email, name, created_at FROM users WHERE id = ${id}
+    SELECT id, email, name, created_at, orchestrator_agent_id, orchestrator_env_id, biz_name FROM users WHERE id = ${id}
   `
   return user ?? null
+}
+
+export async function updateUserOrchestrator(userId: string, data: {
+  orchestratorAgentId: string
+  orchestratorEnvId: string
+  bizName: string
+}) {
+  const db = getDB()
+  await db`
+    UPDATE users SET
+      orchestrator_agent_id = ${data.orchestratorAgentId},
+      orchestrator_env_id = ${data.orchestratorEnvId},
+      biz_name = ${data.bizName}
+    WHERE id = ${userId}
+  `
 }
 
 export async function createAgent(userId: string, data: {
   name: string, role: string, tasks: string[], customTasks: string,
   tools: string[], startHour: string, endHour: string,
   approvalMode: string, reportEmail: string,
-  managedAgentId?: string, environmentId?: string
+  managedAgentId?: string, environmentId?: string,
+  connectionStatus?: string
 }) {
   const db = getDB()
   const [agent] = await db`
-    INSERT INTO agents (user_id, name, role, tasks, custom_tasks, tools, start_hour, end_hour, approval_mode, report_email, managed_agent_id, environment_id)
-    VALUES (${userId}, ${data.name}, ${data.role}, ${data.tasks}, ${data.customTasks}, ${data.tools}, ${data.startHour}, ${data.endHour}, ${data.approvalMode}, ${data.reportEmail}, ${data.managedAgentId ?? null}, ${data.environmentId ?? null})
+    INSERT INTO agents (user_id, name, role, tasks, custom_tasks, tools, start_hour, end_hour, approval_mode, report_email, managed_agent_id, environment_id, connection_status)
+    VALUES (${userId}, ${data.name}, ${data.role}, ${data.tasks}, ${data.customTasks}, ${data.tools}, ${data.startHour}, ${data.endHour}, ${data.approvalMode}, ${data.reportEmail}, ${data.managedAgentId ?? null}, ${data.environmentId ?? null}, ${data.connectionStatus ?? 'pending'})
     RETURNING *
   `
   return agent
@@ -120,6 +142,19 @@ export async function updateAgentStatus(agentId: string, userId: string, status:
   const db = getDB()
   const [agent] = await db`
     UPDATE agents SET status = ${status} WHERE id = ${agentId} AND user_id = ${userId} RETURNING *
+  `
+  return agent
+}
+
+export async function updateAgentConnectionStatus(agentId: string, connectionStatus: string, managedAgentId?: string, environmentId?: string) {
+  const db = getDB()
+  const [agent] = await db`
+    UPDATE agents SET
+      connection_status = ${connectionStatus},
+      managed_agent_id = COALESCE(${managedAgentId ?? null}, managed_agent_id),
+      environment_id = COALESCE(${environmentId ?? null}, environment_id)
+    WHERE id = ${agentId}
+    RETURNING *
   `
   return agent
 }

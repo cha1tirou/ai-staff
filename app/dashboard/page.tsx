@@ -13,6 +13,15 @@ export default async function DashboardPage() {
     getAgentsByUser(session.userId),
   ])
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return <DashboardClient user={user as any} agents={agents as any} />
+  const u = user as any
+  return (
+    <DashboardClient
+      user={u}
+      agents={agents as any}
+      hasOrchestrator={!!u?.orchestrator_agent_id}
+      bizName={u?.biz_name ?? ''}
+      orchestratorAgentId={u?.orchestrator_agent_id ?? null}
+      orchestratorEnvId={u?.orchestrator_env_id ?? null}
+    />
+  )
 }
