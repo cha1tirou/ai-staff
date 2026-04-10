@@ -98,9 +98,36 @@ export default function DashboardClient({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg }),
       })
-      const data = await res.json()
-      const sourceLabel = data.source === 'managed' ? '' : ' （接続待ち中のため簡易応答）'
-      setOrchMessages(prev => [...prev, { role: 'ai', text: data.reply + sourceLabel }])
+
+      const contentType = res.headers.get('content-type') ?? ''
+
+      if (contentType.includes('text/event-stream')) {
+        // SSEストリーミング：リアルタイムでテキストを流す
+        let accumulated = ''
+        setOrchMessages(prev => [...prev, { role: 'ai', text: '' }])
+        const reader = res.body!.getReader()
+        const decoder = new TextDecoder()
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value)
+          for (const line of chunk.split('\n')) {
+            if (line.startsWith('data: ')) {
+              accumulated += line.slice(6)
+              setOrchMessages(prev => {
+                const msgs = [...prev]
+                msgs[msgs.length - 1] = { role: 'ai', text: accumulated }
+                return msgs
+              })
+            }
+          }
+        }
+      } else {
+        // JSONフォールバック
+        const data = await res.json()
+        setOrchMessages(prev => [...prev, { role: 'ai', text: data.reply }])
+      }
     } catch {
       setOrchMessages(prev => [...prev, { role: 'ai', text: 'エラーが発生しました。' }])
     }

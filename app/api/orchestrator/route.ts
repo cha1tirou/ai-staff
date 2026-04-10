@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { getUserById } from '@/lib/db'
-import { createSession, sendSessionMessage, readSessionStream } from '@/lib/managed-agents'
-import Anthropic from '@anthropic-ai/sdk'
+import { getUserById, getAgentsByUser } from '@/lib/db'
 
-const client = new Anthropic()
+const AGENT_SERVER_URL = process.env.AGENT_SERVER_URL ?? ''
+const INTERNAL_SECRET = process.env.INTERNAL_SECRET ?? ''
 
 export async function POST(req: NextRequest) {
   const session = await getSession()
@@ -12,34 +11,50 @@ export async function POST(req: NextRequest) {
 
   const { message } = await req.json()
   const user = await getUserById(session.userId) as any
+  const agents = await getAgentsByUser(session.userId) as any[]
 
-  // オーケストレーターが存在する場合はManaged Agentsで実行
-  if (user?.orchestrator_agent_id && user?.orchestrator_env_id) {
-    try {
-      const agentSession = await createSession(
-        user.orchestrator_agent_id,
-        user.orchestrator_env_id,
-        `ダッシュボード指示: ${message.slice(0, 30)}`
-      )
-      await sendSessionMessage(agentSession.id, message)
-      const reply = await readSessionStream(agentSession.id)
-      return NextResponse.json({ reply, source: 'managed' })
-    } catch (e: any) {
-      console.error('Managed Agents実行エラー、フォールバックへ:', e.message)
-      // フォールバック: 通常Claude APIで応答
-    }
+  // 接続済みのサブエージェントのみ使う
+  const activeAgents = agents.filter((a: any) => a.connection_status === 'active')
+
+  // Pythonサーバーが設定されていない場合はフォールバック
+  if (!AGENT_SERVER_URL || activeAgents.length === 0) {
+    return NextResponse.json({
+      reply: activeAgents.length === 0
+        ? 'まだスタッフの接続が完了していません。しばらくお待ちください。'
+        : 'エージェントサーバーが未設定です。',
+      source: 'fallback'
+    })
   }
 
-  // フォールバック: オーケストレーター未接続の場合は通常APIで応答
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 1000,
-    system: `あなたは${user?.biz_name || '事業者'}のAIスタッフ管理システムです。
-まだAIスタッフの接続設定が完了していません。
-ユーザーの質問には丁寧に答えつつ、「スタッフの接続が完了次第、実際の業務を実行できます」と伝えてください。`,
-    messages: [{ role: 'user', content: message }],
+  // Pythonサーバーにリクエスト（SSEをそのまま流す）
+  const res = await fetch(`${AGENT_SERVER_URL}/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-internal-secret': INTERNAL_SECRET,
+    },
+    body: JSON.stringify({
+      message,
+      biz_name: user?.biz_name ?? user?.name ?? '事業者',
+      sub_agents: activeAgents.map((a: any) => ({
+        name: a.name,
+        role: a.role,
+        tasks: a.tasks ?? [],
+        custom_tasks: a.custom_tasks ?? '',
+      })),
+    }),
   })
 
-  const reply = response.content[0].type === 'text' ? response.content[0].text : ''
-  return NextResponse.json({ reply, source: 'fallback' })
+  if (!res.ok) {
+    return NextResponse.json({ error: 'エージェントサーバーエラー' }, { status: 500 })
+  }
+
+  // SSEをクライアントにそのまま流す
+  return new NextResponse(res.body, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  })
 }
