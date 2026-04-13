@@ -132,13 +132,13 @@ export default function OnboardingPage() {
         setResearchStep(i)
       }
 
-      const text = await callClaude([{
-        role: 'user',
-        content: `事業者「${urlInput}」について以下をJSON形式で返してください（日本語、JSONのみ）：\n{"name":"正式名称または推測名称","type":"業種","description":"事業概要2〜3文","icon":"絵文字1文字"}`
-      }], 'JSONのみ返してください。')
-
-      let info: any = {}
-      try { info = JSON.parse(text.replace(/```json|```/g, '').trim()) } catch {}
+      const researchRes = await fetch('/api/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: urlInput }),
+      })
+      const researchData = await researchRes.json()
+      const info: any = researchData.info ?? {}
 
       const ctx = `事業者: ${info.name || urlInput}\n業種: ${info.type || '不明'}\n概要: ${info.description || ''}`
       setBizContext(ctx)
