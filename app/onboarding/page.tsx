@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
-type Phase = 'research' | 'mode-select' | 'chat' | 'proposal' | 'hiring'
+type Phase = 'intro' | 'research' | 'mode-select' | 'chat' | 'proposal' | 'hiring'
 type Mode = 'defined' | 'explore' | null
 
 type Message = { role: 'ai' | 'user'; text: string }
@@ -85,7 +85,7 @@ PROPOSAL:
 
 export default function OnboardingPage() {
   const router = useRouter()
-  const [phase, setPhase] = useState<Phase>('research')
+  const [phase, setPhase] = useState<Phase>('intro')
   const [mode, setMode] = useState<Mode>(null)
   const [urlInput, setUrlInput] = useState('')
   const [researchStep, setResearchStep] = useState(0)
@@ -267,12 +267,14 @@ export default function OnboardingPage() {
         ? ['この方向でOK、提案してください', 'もう少し詳しく決めたい']
         : [])
 
-  const progressWidth = phase === 'research' ? '25%'
-    : phase === 'mode-select' ? '50%'
-    : phase === 'chat' ? '75%'
+  const progressWidth = phase === 'intro' ? '0%'
+    : phase === 'research' ? '20%'
+    : phase === 'mode-select' ? '40%'
+    : phase === 'chat' ? '70%'
     : '100%'
 
-  const stepLabel = phase === 'research' ? 'ステップ 1 / 4'
+  const stepLabel = phase === 'intro' ? ''
+    : phase === 'research' ? 'ステップ 1 / 4'
     : phase === 'mode-select' ? 'ステップ 2 / 4'
     : phase === 'chat' ? 'ステップ 3 / 4'
     : 'ステップ 4 / 4'
@@ -297,6 +299,69 @@ export default function OnboardingPage() {
 
       <main className="flex-1 flex flex-col items-center px-6 py-8">
         <div className="w-full max-w-lg">
+
+          {/* ── Intro: できること説明 ── */}
+          {phase === 'intro' && (
+            <div className="animate-fade-up">
+              <div className="text-center mb-8">
+                <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center mx-auto mb-5">
+                  <span className="text-2xl">🤖</span>
+                </div>
+                <h1 className="text-2xl font-medium text-fg mb-2">AIスタッフを採用しよう</h1>
+                <p className="text-muted text-sm leading-relaxed">
+                  あなたの業務を毎日こなしてくれる<br />専属のAIスタッフを5分で作れます
+                </p>
+              </div>
+
+              {/* ルーティン外注の価値訴求 */}
+              <div className="p-4 rounded-xl border border-accent/30 bg-accent/5 mb-5">
+                <div className="flex items-start gap-3">
+                  <span className="text-lg mt-0.5">💡</span>
+                  <div>
+                    <div className="text-sm font-medium text-fg mb-1">人を雇うのではなく、業務を外注する感覚</div>
+                    <div className="text-xs text-muted leading-relaxed">
+                      一度設定すれば毎日自動で動きます。週次レポート・競合調査・資料作成など、定期的に発生する業務をAIに任せることで、あなたはより重要な仕事に集中できます。
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* できること一覧 */}
+              <div className="mb-6">
+                <div className="text-xs font-medium text-muted/60 uppercase tracking-wide mb-3">AIスタッフができること</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { icon: '📊', title: 'Excel・レポート作成', desc: 'データをまとめて毎週送付' },
+                    { icon: '📄', title: 'PDF資料・提案書', desc: 'テンプレートへの自動流し込み' },
+                    { icon: '🔍', title: '競合・市場調査', desc: 'Web検索してまとめ報告' },
+                    { icon: '✍️', title: 'コンテンツ生成', desc: 'SNS投稿案・メール文案' },
+                    { icon: '📋', title: '議事録・要約', desc: '会議メモを整形して配布' },
+                    { icon: '📈', title: 'データ分析', desc: 'CSVを渡すと集計・可視化' },
+                  ].map(item => (
+                    <div key={item.title} className="p-3 rounded-lg border border-border bg-surface flex items-start gap-2">
+                      <span className="text-base flex-shrink-0">{item.icon}</span>
+                      <div>
+                        <div className="text-xs font-medium text-fg">{item.title}</div>
+                        <div className="text-xs text-muted">{item.desc}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 注記 */}
+              <p className="text-xs text-muted/60 text-center mb-6">
+                ※ SNS・メールへの直接投稿は現在非対応。ファイル生成・リサーチ系の業務が得意です。
+              </p>
+
+              <button
+                onClick={() => setPhase('research')}
+                className="w-full py-3.5 rounded-xl bg-accent text-white text-sm font-medium hover:bg-blue-500 transition-colors"
+              >
+                スタッフを採用する →
+              </button>
+            </div>
+          )}
 
           {/* ── Phase 0: 事業者入力 ── */}
           {phase === 'research' && researchStep === 0 && (
